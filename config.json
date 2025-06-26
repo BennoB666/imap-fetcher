@@ -1,0 +1,8 @@
+{
+  "imap_server": "imap.1und1.de",
+  "email_account": "test@online.de",
+  "email_password": "start123",
+  "save_folder": "C:/MailPDFs",
+  "check_interval": 300,
+  "mailbox": "INBOX"
+}
