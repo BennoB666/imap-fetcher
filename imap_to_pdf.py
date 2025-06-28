@@ -1,4 +1,3 @@
-
 import imaplib
 import email
 import os
@@ -12,74 +11,65 @@ def load_config():
         return json.load(f)
 
 def save_email_as_pdf(subject, sender, body, save_folder):
-    try:
-        print("PDF wird erstellt...")
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-        pdf.set_font("DejaVu", size=12)
-        pdf.multi_cell(0, 10, f"From: {sender}")
-        pdf.multi_cell(0, 10, f"Subject: {subject}")
-        pdf.multi_cell(0, 10, "Body:\n" + body)
+    pdf = FPDF()
+    pdf.add_page()
+    # Unicode-Schriftart (DejaVuSans.ttf muss im Script-Ordner liegen)
+    pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+    pdf.set_font("DejaVu", size=12)
+    pdf.multi_cell(0, 10, f"From: {sender}")
+    pdf.multi_cell(0, 10, f"Subject: {subject}")
+    pdf.multi_cell(0, 10, "Body:\n" + body)
+    safe = "".join(c if c.isalnum() else "_" for c in subject)[:50]
+    fn = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe}.pdf"
+    path = os.path.join(save_folder, fn)
+    pdf.output(path)
+    print(f"PDF gespeichert: {path}")
 
-        safe_subject = "".join(c if c.isalnum() else "_" for c in subject)[:50]
-        filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_subject}.pdf"
-        filepath = os.path.join(save_folder, filename)
-        pdf.output(filepath)
-        print(f"Gespeichert als: {filepath}")
-    except Exception as e:
-        print("Fehler beim Erstellen der PDF:", e)
-
+def save_attachment(part, save_folder):
+    filename = part.get_filename()
+    if not filename:
+        return
+    # sauberes Dateinamen‑Sanitizing
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in filename)
+    path = os.path.join(save_folder, safe)
+    with open(path, "wb") as fp:
+        fp.write(part.get_payload(decode=True))
+    print(f"Anhang gespeichert: {path}")
 
 def process_mailbox(mail, save_folder):
-    status, messages = mail.search(None, "UNSEEN")
-    print("Suchstatus:", status)
-    print("UNSEEN-Nachrichten:", messages)
-
-    if status != "OK":
+    status, msgs = mail.search(None, "UNSEEN")
+    if status != "OK" or not msgs[0]:
         print("Keine neuen Nachrichten.")
         return
-
-    for num in messages[0].split():
-        print(f"Verarbeite Nachricht Nr. {num.decode()}")
+    for num in msgs[0].split():
         status, data = mail.fetch(num, "(RFC822)")
-        if status != "OK":
-            print("Fehler beim Abrufen der Nachricht.")
-            continue
-
         msg = email.message_from_bytes(data[0][1])
-        subject = msg.get("Subject", "Kein Betreff")
-        sender = msg.get("From", "Unbekannt")
-
-        print("Absender:", sender)
-        print("Betreff:", subject)
-
+        subject = msg.get("Subject", "(kein Betreff)")
+        sender = msg.get("From", "(unbekannt)")
         body = ""
-        if msg.is_multipart():
-            for part in msg.walk():
-                if part.get_content_type() == "text/plain":
-                    body = part.get_payload(decode=True).decode(errors="ignore")
-                    break
-        else:
-            body = msg.get_payload(decode=True).decode(errors="ignore")
-
-        print("Body-Auszug:", body[:200])  # nur ein Ausschnitt
+        # Durch alle Parts iterieren
+        for part in msg.walk():
+            cdisp = part.get_content_disposition()
+            ctype = part.get_content_type()
+            if ctype == "text/plain" and cdisp is None:
+                body = part.get_payload(decode=True).decode(errors="ignore")
+            elif cdisp == "attachment":
+                save_attachment(part, save_folder)
         save_email_as_pdf(subject, sender, body, save_folder)
 
 def main():
-    config = load_config()
+    cfg = load_config()
     while True:
         try:
-            mail = imaplib.IMAP4_SSL(config["imap_server"])
-            mail.login(config["email_account"], config["email_password"])
-            mail.select(config["mailbox"])
-            if not os.path.exists(config["save_folder"]):
-                os.makedirs(config["save_folder"])
-            process_mailbox(mail, config["save_folder"])
-            mail.logout()
+            m = imaplib.IMAP4_SSL(cfg["imap_server"])
+            m.login(cfg["email_account"], cfg["email_password"])
+            m.select(cfg["mailbox"])
+            os.makedirs(cfg["save_folder"], exist_ok=True)
+            process_mailbox(m, cfg["save_folder"])
+            m.logout()
         except Exception as e:
-            print(f"Fehler: {e}")
-        time.sleep(config["check_interval"])
+            print("Fehler:", e)
+        time.sleep(cfg["check_interval"])
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
